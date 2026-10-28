@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.state/
+results/raw/*
+!results/raw/.gitkeep
+.ruff_cache/

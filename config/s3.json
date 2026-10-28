@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "lab",
+      "credentials": [
+        {
+          "accessKey": "lab-access-key",
+          "secretKey": "lab-secret-key"
+        }
+      ],
+      "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+    }
+  ]
+}

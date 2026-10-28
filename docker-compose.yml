@@ -1,0 +1,195 @@
+# Distributed Storage Lab: a SeaweedFS cluster built to be broken and measured.
+#
+#   master          volume placement, cluster topology            :9333 (published)
+#   filer           namespace and metadata (leveldb2 in /data)    :8888 (published)
+#   s3              S3 gateway in front of the filer              :8333 (published)
+#   vol1, vol2      volume servers, rack "rackA"
+#   vol3, vol4      volume servers, rack "rackB"
+#   vol5            optional 5th volume server (profile "scale"), for the rebalancing test
+#
+# Default replication is 010: 0 extra copy in another data center, 1 extra copy
+# in another rack, 0 extra copy in the same rack -> every volume lives on both racks.
+#
+# Every setting lives in this file: no hidden manual command.
+
+name: dslab
+
+x-seaweed: &seaweed
+  image: chrislusf/seaweedfs:${SEAWEEDFS_TAG:-4.48}
+  networks: [storage]
+  # Never restart automatically: a killed node must stay dead during a scenario.
+  restart: "no"
+
+services:
+  master:
+    <<: *seaweed
+    container_name: master
+    hostname: master
+    command:
+      - master
+      - -ip=master
+      - -ip.bind=0.0.0.0
+      - -port=9333
+      - -mdir=/data
+      - -defaultReplication=010
+      # Small volumes so that 1 000 objects spread over several volumes.
+      - -volumeSizeLimitMB=256
+      - -metricsPort=9324
+    ports:
+      - "127.0.0.1:9333:9333"
+    volumes:
+      - master-data:/data
+
+  vol1:
+    <<: *seaweed
+    container_name: vol1
+    hostname: vol1
+    depends_on: [master]
+    command:
+      - volume
+      - -ip=vol1
+      - -ip.bind=0.0.0.0
+      - -port=8080
+      - -master=master:9333
+      - -dir=/data
+      - -max=40
+      - -dataCenter=dc1
+      - -rack=rackA
+      # Default is 10 s, which would hit Docker's 10 s stop timeout.
+      - -preStopSeconds=2
+      - -metricsPort=9325
+    volumes:
+      - vol1-data:/data
+
+  vol2:
+    <<: *seaweed
+    container_name: vol2
+    hostname: vol2
+    depends_on: [master]
+    command:
+      - volume
+      - -ip=vol2
+      - -ip.bind=0.0.0.0
+      - -port=8080
+      - -master=master:9333
+      - -dir=/data
+      - -max=40
+      - -dataCenter=dc1
+      - -rack=rackA
+      - -preStopSeconds=2
+      - -metricsPort=9325
+    volumes:
+      - vol2-data:/data
+
+  vol3:
+    <<: *seaweed
+    container_name: vol3
+    hostname: vol3
+    depends_on: [master]
+    command:
+      - volume
+      - -ip=vol3
+      - -ip.bind=0.0.0.0
+      - -port=8080
+      - -master=master:9333
+      - -dir=/data
+      - -max=40
+      - -dataCenter=dc1
+      - -rack=rackB
+      - -preStopSeconds=2
+      - -metricsPort=9325
+    volumes:
+      - vol3-data:/data
+
+  vol4:
+    <<: *seaweed
+    container_name: vol4
+    hostname: vol4
+    depends_on: [master]
+    command:
+      - volume
+      - -ip=vol4
+      - -ip.bind=0.0.0.0
+      - -port=8080
+      - -master=master:9333
+      - -dir=/data
+      - -max=40
+      - -dataCenter=dc1
+      - -rack=rackB
+      - -preStopSeconds=2
+      - -metricsPort=9325
+    volumes:
+      - vol4-data:/data
+
+  # Started only by `make vol5` (T09, rebalancing after adding a node).
+  vol5:
+    <<: *seaweed
+    container_name: vol5
+    hostname: vol5
+    profiles: [scale]
+    depends_on: [master]
+    command:
+      - volume
+      - -ip=vol5
+      - -ip.bind=0.0.0.0
+      - -port=8080
+      - -master=master:9333
+      - -dir=/data
+      - -max=40
+      - -dataCenter=dc1
+      - -rack=${VOL5_RACK:-rackA}
+      - -preStopSeconds=2
+      - -metricsPort=9325
+    volumes:
+      - vol5-data:/data
+
+  filer:
+    <<: *seaweed
+    container_name: filer
+    hostname: filer
+    depends_on: [master]
+    command:
+      - filer
+      - -ip=filer
+      - -ip.bind=0.0.0.0
+      - -port=8888
+      - -master=master:9333
+      - -metricsPort=9326
+    ports:
+      - "127.0.0.1:8888:8888"
+    volumes:
+      - filer-data:/data
+
+  s3:
+    <<: *seaweed
+    container_name: s3
+    hostname: s3
+    depends_on: [filer]
+    command:
+      - s3
+      - -ip=s3
+      - -ip.bind=0.0.0.0
+      - -port=8333
+      - -filer=filer:8888
+      - -config=/etc/seaweedfs/s3.json
+      # Iceberg and Lance catalogs are on by default and useless here.
+      - -port.iceberg=0
+      - -port.lance=0
+      - -metricsPort=9327
+    ports:
+      - "127.0.0.1:8333:8333"
+    volumes:
+      - ./config/s3.json:/etc/seaweedfs/s3.json:ro
+
+networks:
+  storage:
+    name: dslab-storage
+
+volumes:
+  master-data:
+  filer-data:
+  vol1-data:
+  vol2-data:
+  vol3-data:
+  vol4-data:
+  vol5-data:
